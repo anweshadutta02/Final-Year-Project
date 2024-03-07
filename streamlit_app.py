@@ -5,15 +5,15 @@ from sklearn.metrics.pairwise import cosine_similarity
 from pyarrow.parquet import ParquetDataset
 
 # File Paths
-udemy_courses = "udemy_courses.parquet"
-new_ratings = "new_ratings.parquet"
-users = "Users.parquet"
+udemy_courses = "Files/udemy_courses.csv"
+new_ratings = "Files/new_ratings.csv"
+users = "Files/Users.csv"
 
 # Load the datas for content-based recommendations
 @st.cache_resource
 def load_udemy_courses():
-    dataset = ParquetDataset(udemy_courses)
-    df = dataset.read_pandas().to_pandas()
+    # dataset = ParquetDataset(udemy_courses)
+    df = pd.read_csv(udemy_courses)
     tf_idf = TfidfVectorizer(stop_words="english")
     tf_idf_matrix = tf_idf.fit_transform(df["course_title"])
     cosine_sim = cosine_similarity(tf_idf_matrix)
@@ -25,10 +25,10 @@ df, cosine_sim, course_title_to_index = load_udemy_courses()
 # Load the datas for collaborative filtering recommendations
 @st.cache_resource
 def load_users_and_ratings():
-    users_dataset = ParquetDataset(users)
-    users_df = users_dataset.read_pandas().to_pandas()
-    ratings_dataset = ParquetDataset(new_ratings)
-    ratings_df = ratings_dataset.read_pandas().to_pandas()
+    # users_dataset = ParquetDataset(users)
+    users_df = pd.read_csv(users)
+    # ratings_dataset = ParquetDataset(new_ratings)
+    ratings_df = pd.read_csv(new_ratings)
     df2 = pd.merge(ratings_df, users_df, on='User-ID')
     df2 = pd.merge(df2, df, on='course_id')
     user_course_matrix = df2.pivot_table(index='User-ID', columns='course_id', values='Rating').fillna(0)
