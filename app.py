@@ -65,8 +65,26 @@ def collaborative_recommender(course_name, user_course_matrix, course_similarity
     recommended_courses = [df[df['course_id'] == cid]['course_title'].iloc[0] for cid in recommended_course_ids if cid in df['course_id'].values]
     return recommended_courses
 
-def hybrid_recommender(course_title):
-    return ["Hybrid recommendations are not yet implemented."]
+def hybrid_recommender(course_name, content_weight=0.5):
+    # Get recommendations from both models
+    content_based_rec = content_based_recommender(course_name, df, cosine_sim, course_title_to_index)
+    collaborative_filtering_rec = collaborative_recommender(course_name, user_course_matrix, course_similarity_df, df, num_recommendations=7)
+    
+    # Calculate hybrid recommendations as a weighted average
+    hybrid_rec = []
+    for item in content_based_rec:
+        hybrid_rec.append((item, content_weight))
+    
+    for item in collaborative_filtering_rec:
+        hybrid_rec.append((item, 1 - content_weight))
+
+    # Sort recommendations by the weighted score
+    hybrid_rec.sort(key=lambda x: x[1], reverse=True)
+
+    # Extract recommended items without weights
+    hybrid_rec = [item[0] for item in hybrid_rec][:5]
+
+    return hybrid_rec 
 
 # Streamlit app
 st.title("Udemy Course Recommender")
@@ -103,7 +121,7 @@ if user_input:
         elif selected_tab_index == 1:
             recommendations = collaborative_recommender(course, user_course_matrix, course_similarity_df, df, num_recommendations=5)
         else:
-            recommendations = hybrid_recommender(user_input)
+            recommendations = hybrid_recommender(course)
 
         if isinstance(recommendations, str):
             st.write(recommendations)
