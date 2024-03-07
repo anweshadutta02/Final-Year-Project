@@ -1,1 +1,4 @@
-scikit-learn==1.1.2
+streamlit
+pandas
+scikit-learn
+pyarrow
