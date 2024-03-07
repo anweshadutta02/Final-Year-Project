@@ -3,8 +3,14 @@ from streamlit.components.v1 import html
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+from pyarrow.parquet import ParquetDataset
 
-#Styles
+# File Paths
+udemy_courses = "udemy_courses.parquet"
+new_ratings = "new_ratings.parquet"
+users = "Users.parquet"
+
+# Styles
 button_style = """
 <style>
   .stButton > button {
@@ -22,7 +28,12 @@ button_style = """
 </style>"""
 
 # Load the datas for content-based recommendations
-df = pd.read_csv("udemy_courses.csv")
+@st.cache_resource
+def load_udemy_courses():
+    dataset = ParquetDataset(udemy_courses)
+    return dataset.read_pandas().to_pandas()
+
+df = load_udemy_courses()
 
 # Create TF-IDF matrix for content-based recommendations
 tf_idf = TfidfVectorizer(stop_words="english")
@@ -33,17 +44,23 @@ cosine_sim = cosine_similarity(tf_idf_matrix)
 course_title_to_index = {title: i for i, title in enumerate(df["course_title"])}
 
 # Load the datas for collaborative filtering recommendations
-users_df = pd.read_csv('Users.csv')
-ratings_df = pd.read_csv('new_ratings.csv')
-df2 = pd.merge(ratings_df, users_df, on='User-ID')
-df2 = pd.merge(df2, df, on='course_id')
-user_course_matrix = df2.pivot_table(index='User-ID', columns='course_id', values='Rating')
-user_course_matrix = user_course_matrix.fillna(0)
+@st.cache_resource
+def load_users_and_ratings():
+    users_dataset = ParquetDataset(users)
+    users_df = users_dataset.read_pandas().to_pandas()
+    ratings_dataset = ParquetDataset(new_ratings)
+    ratings_df = ratings_dataset.read_pandas().to_pandas()
+    df2 = pd.merge(ratings_df, users_df, on='User-ID')
+    df2 = pd.merge(df2, df, on='course_id')
+    user_course_matrix = df2.pivot_table(index='User-ID', columns='course_id', values='Rating')
+    user_course_matrix = user_course_matrix.fillna(0)
+    return user_course_matrix
+
+user_course_matrix = load_users_and_ratings()
 
 # Create cosine similarity matrix for collaborative filtering recommendations
 course_similarity = cosine_similarity(user_course_matrix.T)
 course_similarity_df = pd.DataFrame(course_similarity, index=user_course_matrix.columns, columns=user_course_matrix.columns)
-
 
 def content_based_recommender(title):
     """
@@ -55,7 +72,6 @@ def content_based_recommender(title):
     Returns:
         list: A list of recommended course titles.
     """
-
     course_index = course_title_to_index.get(title)
     if course_index is None:
         return ["Course not found."]
@@ -67,7 +83,7 @@ def content_based_recommender(title):
 
     return df["course_title"].iloc[course_indices]
 
-
+@st.cache_resource
 def recommend_courses(course_name, num_recommendations=5):
     # Clean and preprocess course name (remove leading/trailing whitespaces, make it lowercase)
     course_name = course_name.strip().lower()
@@ -85,7 +101,6 @@ def recommend_courses(course_name, num_recommendations=5):
     recommended_courses.remove(course_id)  # Remove the input course itself
     return recommended_courses
 
-
 def collaborative_recommender(course):
     """
     Recommends courses similar to the given title using collaborative filtering
@@ -97,16 +112,13 @@ def collaborative_recommender(course):
     Returns:
         list: A list of recommended course titles (currently placeholder).
     """
+    recommendations = recommend_courses(course, num_recommendations=10)
 
-    # recommendations = recommend_courses(course, num_recommendations=10)
+    if isinstance(recommendations, str):
+        return [recommendations]  # Return error message as a list
 
-    # if isinstance(recommendations, str):
-    #     return [recommendations]  # Return error message as a list
-
-    # recommended_titles = [df[df['course_id'] == course]['course_title'].values[0] for course in recommendations]
-    # return recommended_titles
-    return ["None as of yet."]
-
+    recommended_titles = [df[df['course_id'] == course]['course_title'].values[0] for course in recommendations]
+    return recommended_titles
 
 def hybrid_recommender(title):
     """
@@ -119,9 +131,7 @@ def hybrid_recommender(title):
     Returns:
         list: A list of recommended course titles (currently placeholder).
     """
-
     return ["Hybrid recommendations are not yet implemented."]
-
 
 # Streamlit app
 st.title("Udemy Course Recommender")
@@ -154,11 +164,14 @@ selected_tab_index = st.session_state["selected_tab_index"]
 # Display content based on selected tab
 if user_input:
     if selected_tab_index == 0:
-        recommendations = content_based_recommender(course)
+        with st.spinner("Computing content-based recommendations..."):
+            recommendations = content_based_recommender(course)
     elif selected_tab_index == 1:
-        recommendations = collaborative_recommender(course)
+        with st.spinner("Computing collaborative recommendations..."):
+            recommendations = collaborative_recommender(course)
     elif selected_tab_index == 2:
-        recommendations = hybrid_recommender(user_input)
+        with st.spinner("Computing hybrid recommendations..."):
+            recommendations = hybrid_recommender(user_input)
     else:
         recommendations = []
 
