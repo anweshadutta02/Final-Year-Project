@@ -2,6 +2,9 @@ import streamlit as st
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.preprocessing import LabelEncoder
+from sklearn.linear_model import LogisticRegression
+from sklearn.calibration import CalibratedClassifierCV
 
 # Set page configuration
 st.set_page_config(page_title="Udemy Course Recommender", layout="wide")
@@ -11,10 +14,9 @@ udemy_courses = "udemy_courses.parquet"
 new_ratings = "new_ratings.parquet"
 users = "Users.parquet"
 
-# Load the datas for content-based recommendations
+# Load the data for content-based recommendations
 @st.cache_resource
 def load_udemy_courses():
-    # dataset = ParquetDataset(udemy_courses)
     df = pd.read_parquet(udemy_courses)
     tf_idf = TfidfVectorizer(stop_words="english")
     tf_idf_matrix = tf_idf.fit_transform(df["course_title"])
@@ -24,7 +26,7 @@ def load_udemy_courses():
 
 df, cosine_sim, course_title_to_index = load_udemy_courses()
 
-# Load the datas for collaborative filtering recommendations
+# Load the data for collaborative filtering recommendations
 @st.cache_resource
 def load_users_and_ratings():
     users_df = pd.read_parquet(users)
@@ -38,45 +40,45 @@ def load_users_and_ratings():
 user_course_matrix, course_similarity_df = load_users_and_ratings()
 
 # Recommenders
-def content_based_recommender(title, df, cosine_sim, course_title_to_index):
+def content_based_recommender(title):
     course_index = course_title_to_index.get(title)
     if course_index is None:
         return ["Course not found."]
     similarity_scores = pd.DataFrame(cosine_sim[course_index], columns=["score"])
-    course_indices = similarity_scores.sort_values("score", ascending=False)[1:6].index
-    recommended_courses = [df["course_title"].iloc[idx] for idx in course_indices if idx < len(df)]
+    course_indices = similarity_scores.sort_values("score", ascending=False)[1:7].index
+    filtered_indices = [idx for idx in course_indices if idx != course_index and idx < len(df)]
+    recommended_courses = [df["course_title"].iloc[idx] for idx in filtered_indices]
     return recommended_courses
 
-def collaborative_recommender(course_name, user_course_matrix, course_similarity_df, df, num_recommendations=10):
+def collaborative_recommender(course_name):
     course_name = course_name.strip().lower()
     if course_name not in df['course_title'].str.lower().unique():
         return f"Course '{course_name}' not present in 'course_title' column in the dataset."
-
     course_id = df[df['course_title'].str.lower() == course_name]['course_id'].iloc[0]
-
     similar_courses = course_similarity_df[course_id]
     similar_courses = similar_courses.sort_values(ascending=False)
-    recommended_course_ids = similar_courses.head(num_recommendations + 1).index.tolist()
+    recommended_course_ids = similar_courses.head(11).index.tolist()
     recommended_course_ids.remove(course_id) 
     recommended_courses = [df[df['course_id'] == cid]['course_title'].iloc[0] for cid in recommended_course_ids if cid in df['course_id'].values]
-    return recommended_courses
+    return recommended_courses[:6]
 
-def hybrid_recommender(course_name, content_weight=0.5):
-    content_based_rec = content_based_recommender(course_name, df, cosine_sim, course_title_to_index)[:5]
-    collaborative_filtering_rec = collaborative_recommender(course_name, user_course_matrix, course_similarity_df, df, num_recommendations=5)
-    
-    hybrid_rec = []
-    for item in content_based_rec:
-        hybrid_rec.append((item, content_weight))
-    
-    for item in collaborative_filtering_rec:
-        hybrid_rec.append((item, 1 - content_weight))
-
-    hybrid_rec.sort(key=lambda x: x[1], reverse=True)
-
-    hybrid_rec = [item[0] for item in hybrid_rec]
-
-    return hybrid_rec 
+def hybrid_recommender(course_name):
+    content_based_rec = content_based_recommender(course_name)[:4]
+    collaborative_filtering_rec = collaborative_recommender(course_name)
+    features = ['Content-Based'] * len(content_based_rec) + ['Collaborative'] * len(collaborative_filtering_rec)
+    label_encoder = LabelEncoder()
+    X_encoded = label_encoder.fit_transform(features)
+    y = [1] * len(content_based_rec) + [0] * len(collaborative_filtering_rec)
+    model = LogisticRegression()
+    calibrated_model = CalibratedClassifierCV(model, cv=3)
+    calibrated_model.fit(X_encoded.reshape(-1, 1), y)
+    all_features = ['Content-Based'] * 6 + ['Collaborative'] * 6
+    all_features_encoded = label_encoder.transform(all_features)
+    all_probs = calibrated_model.predict_proba(all_features_encoded.reshape(-1, 1))[:, 1]
+    rec_with_probs = list(zip(all_features, all_probs, content_based_rec + collaborative_filtering_rec))
+    rec_with_probs.sort(key=lambda x: x[1], reverse=True)
+    hybrid_rec = [item[2] for item in rec_with_probs[:6]]
+    return hybrid_rec
 
 # Streamlit app
 def recommend_courses(user_input, course, selected_tab_index):
@@ -85,14 +87,13 @@ def recommend_courses(user_input, course, selected_tab_index):
             st.write("Click on any button to show different recommendations")
         else:
             if selected_tab_index == "Content-Based":
-                recommendations = content_based_recommender(course, df, cosine_sim, course_title_to_index)
+                recommendations = content_based_recommender(course)
             elif selected_tab_index == "Collaborative":
-                recommendations = collaborative_recommender(course, user_course_matrix, course_similarity_df, df, num_recommendations=5)
+                recommendations = collaborative_recommender(course)
             elif selected_tab_index == "Hybrid":
                 recommendations = hybrid_recommender(course)
             else:
                 recommendations = None
-
             if isinstance(recommendations, str):
                 st.write(recommendations)
             else:
@@ -103,18 +104,12 @@ def recommend_courses(user_input, course, selected_tab_index):
         st.write("Course not found.")
 
 st.title("Udemy Course Recommender")
-
 user_input = st.sidebar.text_input("Enter a subject or course title:", key="user_input")
-
-# Create buttons for tabs
 st.sidebar.markdown("## Choose Recommendation Type")
 selected_tab_index = st.sidebar.radio("", ["Content-Based", "Collaborative", "Hybrid"], key="selected_tab_index")
-
 if user_input:
     course = next((col for col in df['course_title'] if user_input in col), None)
     if not course:
         st.sidebar.warning("Course not found.")
-
-# Display content based on selected tab
 if user_input and course:
     recommend_courses(user_input, course, selected_tab_index)
