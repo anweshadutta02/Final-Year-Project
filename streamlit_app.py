@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+from st_aggrid import AgGrid
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.preprocessing import LabelEncoder
@@ -8,6 +9,15 @@ from sklearn.calibration import CalibratedClassifierCV
 
 # Set page configuration
 st.set_page_config(page_title="Udemy Course Recommender", layout="wide")
+
+# Custom CSS to change the color of the sidebar
+st.markdown("""
+    <style>
+        [data-testid=stSidebar] {
+            background-color: #808080;
+        }
+    </style>
+    """, unsafe_allow_html=True)
 
 # File Paths
 udemy_courses = "udemy_courses.parquet"
@@ -60,7 +70,7 @@ def collaborative_recommender(course_name):
     recommended_course_ids = similar_courses.head(11).index.tolist()
     recommended_course_ids.remove(course_id) 
     recommended_courses = [df[df['course_id'] == cid]['course_title'].iloc[0] for cid in recommended_course_ids if cid in df['course_id'].values]
-    return recommended_courses[:6]
+    return recommended_courses[:5]
 
 def hybrid_recommender(course_name):
     content_based_rec = content_based_recommender(course_name)[:4]
@@ -94,22 +104,27 @@ def recommend_courses(user_input, course, selected_tab_index):
                 recommendations = hybrid_recommender(course)
             else:
                 recommendations = None
-            if isinstance(recommendations, str):
-                st.write(recommendations)
+            if recommendations is None:
+                st.write("No recommendations found.")
             else:
-                st.write("Here are some recommended courses:")
+                st.write(f"Here are some recommended courses using {selected_tab_index} recommender system:")
                 for rec in recommendations:
                     st.write(f"- {rec}")
-    else:
-        st.write("Course not found.")
+    elif not user_input:
+        st.subheader("Hello guys!")
+        st.write("Enter a subject or course title in the text box on the left. \n\nThen, choose a recommendation type from the options provided. ")
 
-st.title("Udemy Course Recommender")
+st.title("🎓Udemy Course Recommender🎓")
 user_input = st.sidebar.text_input("Enter a subject or course title:", key="user_input")
 st.sidebar.markdown("## Choose Recommendation Type")
 selected_tab_index = st.sidebar.radio("", ["Content-Based", "Collaborative", "Hybrid"], key="selected_tab_index")
-if user_input:
+
+# Only display instructions if no input is provided
+if not user_input:
+    recommend_courses(None, None, selected_tab_index)
+else:
     course = next((col for col in df['course_title'] if user_input in col), None)
     if not course:
         st.sidebar.warning("Course not found.")
-if user_input and course:
-    recommend_courses(user_input, course, selected_tab_index)
+    else:
+        recommend_courses(user_input, course, selected_tab_index)
