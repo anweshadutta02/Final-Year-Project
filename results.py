@@ -1,7 +1,5 @@
-import streamlit as st
 import pandas as pd
 import numpy as np
-from st_aggrid import AgGrid
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.preprocessing import LabelEncoder
@@ -9,25 +7,12 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
-# Set page configuration
-st.set_page_config(page_title="Udemy Course Recommender", layout="wide")
-
-# Custom CSS to change the color of the sidebar
-st.markdown("""
-    <style>
-        [data-testid=stSidebar] {
-            background-color: #808080;
-        }
-    </style>
-    """, unsafe_allow_html=True)
-
 # File Paths
 udemy_courses = "udemy_courses.parquet"
 new_ratings = "new_ratings.parquet"
 users = "Users.parquet"
 
 # Load the data for content-based recommendations
-@st.cache_resource
 def load_udemy_courses():
     courses_df = pd.read_parquet(udemy_courses)
     tf_idf = TfidfVectorizer(stop_words="english")
@@ -39,7 +24,6 @@ def load_udemy_courses():
 courses_df, cosine_sim, course_title_to_index = load_udemy_courses()
 
 # Load the data for collaborative filtering recommendations
-@st.cache_resource
 def load_users_and_ratings():
     users_df = pd.read_parquet(users)
     ratings_df = pd.read_parquet(new_ratings)
@@ -72,7 +56,7 @@ def collaborative_recommender(course_title):
     recommended_course_ids = similar_courses.head(11).index.tolist()
     recommended_course_ids.remove(course_id) 
     recommended_courses = [courses_df[courses_df['course_id'] == cid]['course_title'].iloc[0] for cid in recommended_course_ids if cid in courses_df['course_id'].values]
-    return recommended_courses[:5]
+    return recommended_courses
 
 def hybrid_recommender(course_title):
     content_based_rec = content_based_recommender(course_title)[:4]
@@ -92,7 +76,7 @@ def hybrid_recommender(course_title):
     hybrid_rec = [item[2] for item in rec_with_probs[:6]]
     return hybrid_rec
 
-# Result Analysis
+
 def evaluate_recommendations(course_name):
     # Content-based evaluation
     recommended_courses_content = content_based_recommender(course_name)
@@ -101,7 +85,7 @@ def evaluate_recommendations(course_name):
         non_zero_ratings_for_course = df2[(df2['course_title'] == course_title) & (df2['Rating'] != 0)]['Rating']
         ratings_array = np.array(non_zero_ratings_for_course.mean())
         ratings_for_each_course_content.append(ratings_array.tolist()) 
-    ratings_array2_content = [ratings_for_each_course_content[-1]] * len(recommended_courses_content)
+    ratings_array2_content = [np.mean(ratings_for_each_course_content)] * len(recommended_courses_content)
     mae_content = mean_absolute_error(ratings_array2_content, ratings_for_each_course_content)
     mse_content = mean_squared_error(ratings_array2_content, ratings_for_each_course_content)
     
@@ -113,7 +97,7 @@ def evaluate_recommendations(course_name):
         non_zero_ratings_for_course = df2[(df2['course_title'] == course_title) & (df2['Rating'] != 0)]['Rating']
         ratings_array = np.array(non_zero_ratings_for_course.mean())
         ratings_for_each_course_collab.append(ratings_array.tolist())
-    ratings_array2_collab = [ratings_for_each_course_collab[-1]] * len(recommended_courses_collab)
+    ratings_array2_collab = [np.mean(ratings_for_each_course_collab)] * len(recommended_courses_collab)
     mae_collab = mean_absolute_error(ratings_array2_collab, ratings_for_each_course_collab)
     mse_collab = mean_squared_error(ratings_array2_collab, ratings_for_each_course_collab)
     
@@ -125,7 +109,7 @@ def evaluate_recommendations(course_name):
         non_zero_ratings_for_course = df2[(df2['course_title'] == course_title) & (df2['Rating'] != 0)]['Rating']
         ratings_array = np.array(non_zero_ratings_for_course.mean())
         ratings_for_each_course_hybrid.append(ratings_array.tolist())
-    ratings_array2_hybrid = [ratings_for_each_course_hybrid[-1]] * len(recommended_courses_hybrid)
+    ratings_array2_hybrid = [np.mean(ratings_for_each_course_hybrid)] * len(recommended_courses_hybrid)
     mae_hybrid = mean_absolute_error(ratings_array2_hybrid, ratings_for_each_course_hybrid)
     mse_hybrid = mean_squared_error(ratings_array2_hybrid, ratings_for_each_course_hybrid)
     
@@ -135,41 +119,12 @@ def evaluate_recommendations(course_name):
         "Hybrid": {"MAE": mae_hybrid, "MSE": mse_hybrid}
     }
 
-# Streamlit app
-def recommend_courses(user_input, course, selected_tab_index):
-    if user_input and course:
-        if selected_tab_index is None:
-            st.write("Click on any button to show different recommendations")
-        else:
-            if selected_tab_index == "Content-Based":
-                recommendations = content_based_recommender(course)
-            elif selected_tab_index == "Collaborative":
-                recommendations = collaborative_recommender(course)
-            elif selected_tab_index == "Hybrid":
-                recommendations = hybrid_recommender(course)
-            else:
-                recommendations = None
-            if recommendations is None:
-                st.write("No recommendations found.")
-            else:
-                st.write(f"Here are some recommended courses using {selected_tab_index} recommender system:")
-                for rec in recommendations:
-                    st.write(f"- {rec}")
-    elif not user_input:
-        st.subheader("Hello guys!")
-        st.write("Enter a subject or course title in the text box on the left. \n\nThen, choose a recommendation type from the options provided. ")
+# Evaluate the models
+user_input = 'Build Websites from Scratch with HTML & CSS'
+course_name = next((col for col in courses_df['course_title'] if user_input in col), None)
+evaluation_results = evaluate_recommendations(course_name)
 
-st.title("🎓Udemy Course Recommender🎓")
-user_input = st.sidebar.text_input("Enter a subject or course title:", key="user_input")
-st.sidebar.markdown("## Choose Recommendation Type")
-selected_tab_index = st.sidebar.radio("", ["Content-Based", "Collaborative", "Hybrid"], key="selected_tab_index")
-
-# Only display instructions if no input is provided
-if not user_input:
-    recommend_courses(None, None, selected_tab_index)
-else:
-    course = next((col for col in courses_df['course_title'] if user_input in col), None)
-    if not course:
-        st.sidebar.warning("Course not found.")
-    else:
-        recommend_courses(user_input, course, selected_tab_index)
+# Print the evaluation results
+print("Evaluation Results for", course_name)
+for model, metrics in evaluation_results.items():
+    print(f"{model} - MAE: {metrics['MAE']}, MSE: {metrics['MSE']}")
