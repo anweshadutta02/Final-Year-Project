@@ -101,7 +101,7 @@ def evaluate_recommendations(course_name):
         non_zero_ratings_for_course = df2[(df2['course_title'] == course_title) & (df2['Rating'] != 0)]['Rating']
         ratings_array = np.array(non_zero_ratings_for_course.mean())
         ratings_for_each_course_content.append(ratings_array.tolist()) 
-    ratings_array2_content = [ratings_for_each_course_content[-1]] * len(recommended_courses_content)
+    ratings_array2_content = [np.mean(ratings_for_each_course_content)] * len(recommended_courses_content)
     mae_content = mean_absolute_error(ratings_array2_content, ratings_for_each_course_content)
     mse_content = mean_squared_error(ratings_array2_content, ratings_for_each_course_content)
     
@@ -113,7 +113,7 @@ def evaluate_recommendations(course_name):
         non_zero_ratings_for_course = df2[(df2['course_title'] == course_title) & (df2['Rating'] != 0)]['Rating']
         ratings_array = np.array(non_zero_ratings_for_course.mean())
         ratings_for_each_course_collab.append(ratings_array.tolist())
-    ratings_array2_collab = [ratings_for_each_course_collab[-1]] * len(recommended_courses_collab)
+    ratings_array2_collab = [np.mean(ratings_for_each_course_collab)] * len(recommended_courses_collab)
     mae_collab = mean_absolute_error(ratings_array2_collab, ratings_for_each_course_collab)
     mse_collab = mean_squared_error(ratings_array2_collab, ratings_for_each_course_collab)
     
@@ -125,7 +125,7 @@ def evaluate_recommendations(course_name):
         non_zero_ratings_for_course = df2[(df2['course_title'] == course_title) & (df2['Rating'] != 0)]['Rating']
         ratings_array = np.array(non_zero_ratings_for_course.mean())
         ratings_for_each_course_hybrid.append(ratings_array.tolist())
-    ratings_array2_hybrid = [ratings_for_each_course_hybrid[-1]] * len(recommended_courses_hybrid)
+    ratings_array2_hybrid = [np.mean(ratings_for_each_course_hybrid)] * len(recommended_courses_hybrid)
     mae_hybrid = mean_absolute_error(ratings_array2_hybrid, ratings_for_each_course_hybrid)
     mse_hybrid = mean_squared_error(ratings_array2_hybrid, ratings_for_each_course_hybrid)
     
@@ -134,6 +134,7 @@ def evaluate_recommendations(course_name):
         "Collaborative": {"MAE": mae_collab, "MSE": mse_collab},
         "Hybrid": {"MAE": mae_hybrid, "MSE": mse_hybrid}
     }
+
 
 # Streamlit app
 def recommend_courses(user_input, course, selected_tab_index):
