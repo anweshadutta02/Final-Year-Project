@@ -8,6 +8,7 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.linear_model import LogisticRegression
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import mean_absolute_error, mean_squared_error
+import unicodedata
 
 # Set page configuration
 st.set_page_config(page_title="Udemy Course Recommender", layout="wide")
@@ -26,6 +27,15 @@ udemy_courses = "udemy_courses.parquet"
 new_ratings = "new_ratings.parquet"
 users = "Users.parquet"
 
+def clean_text(text):
+    """
+    Clean and normalize the text by removing special characters, accents, and converting to lowercase.
+    """
+    if not pd.isnull(text):
+        text = unicodedata.normalize('NFD', text).encode('ascii', 'ignore').decode("utf-8")
+        return text.lower().strip()
+    return text
+
 # Load the data for content-based recommendations
 @st.cache_resource
 def load_udemy_courses():
@@ -37,6 +47,7 @@ def load_udemy_courses():
     return courses_df, cosine_sim, course_title_to_index
 
 courses_df, cosine_sim, course_title_to_index = load_udemy_courses()
+courses_df['course_title_cleaned'] = courses_df['course_title'].apply(clean_text)
 
 # Load the data for collaborative filtering recommendations
 @st.cache_resource
@@ -60,13 +71,13 @@ def content_based_recommender(course_title):
     course_indices = similarity_scores.sort_values("score", ascending=False)[1:7].index
     filtered_indices = [idx for idx in course_indices if idx != course_index and idx < len(courses_df)]
     recommended_courses = [courses_df["course_title"].iloc[idx] for idx in filtered_indices]
-    return recommended_courses
+    return recommended_courses[:5]
 
 def collaborative_recommender(course_title):
-    course_title = course_title.strip().lower()
-    if course_title not in courses_df['course_title'].str.lower().unique():
+    course_title_cleaned = clean_text(course_title)
+    if course_title_cleaned not in courses_df['course_title_cleaned'].unique():
         return f"Course '{course_title}' not present in 'course_title' column in the dataset."
-    course_id = courses_df[courses_df['course_title'].str.lower() == course_title]['course_id'].iloc[0]
+    course_id = courses_df[courses_df['course_title_cleaned'] == course_title_cleaned]['course_id'].iloc[0]
     similar_courses = course_similarity_df[course_id]
     similar_courses = similar_courses.sort_values(ascending=False)
     recommended_course_ids = similar_courses.head(11).index.tolist()
@@ -77,64 +88,48 @@ def collaborative_recommender(course_title):
 def hybrid_recommender(course_title):
     content_based_rec = content_based_recommender(course_title)[:4]
     collaborative_filtering_rec = collaborative_recommender(course_title)
+    
+    # Ensure both are lists
+    if not isinstance(content_based_rec, list):
+        content_based_rec = [content_based_rec]
+    if not isinstance(collaborative_filtering_rec, list):
+        collaborative_filtering_rec = [collaborative_filtering_rec]
+    
     features = ['Content-Based'] * len(content_based_rec) + ['Collaborative'] * len(collaborative_filtering_rec)
     label_encoder = LabelEncoder()
     X_encoded = label_encoder.fit_transform(features)
     y = [1] * len(content_based_rec) + [0] * len(collaborative_filtering_rec)
     model = LogisticRegression()
-    calibrated_model = CalibratedClassifierCV(model, cv=3)
-    calibrated_model.fit(X_encoded.reshape(-1, 1), y)
+    model.fit(X_encoded.reshape(-1, 1), y)
     all_features = ['Content-Based'] * 6 + ['Collaborative'] * 6
     all_features_encoded = label_encoder.transform(all_features)
-    all_probs = calibrated_model.predict_proba(all_features_encoded.reshape(-1, 1))[:, 1]
+    all_probs = model.predict_proba(all_features_encoded.reshape(-1, 1))[:, 1]
     rec_with_probs = list(zip(all_features, all_probs, content_based_rec + collaborative_filtering_rec))
     rec_with_probs.sort(key=lambda x: x[1], reverse=True)
     hybrid_rec = [item[2] for item in rec_with_probs[:6]]
     return hybrid_rec
 
-# Result Analysis
-def evaluate_recommendations(course_name):
-    # Content-based evaluation
-    recommended_courses_content = content_based_recommender(course_name)
-    ratings_for_each_course_content = []
-    for course_title in recommended_courses_content:
-        non_zero_ratings_for_course = df2[(df2['course_title'] == course_title) & (df2['Rating'] != 0)]['Rating']
-        ratings_array = np.array(non_zero_ratings_for_course.mean())
-        ratings_for_each_course_content.append(ratings_array.tolist()) 
-    ratings_array2_content = [np.mean(ratings_for_each_course_content)] * len(recommended_courses_content)
-    mae_content = mean_absolute_error(ratings_array2_content, ratings_for_each_course_content)
-    mse_content = mean_squared_error(ratings_array2_content, ratings_for_each_course_content)
-    
-    # Collaborative evaluation
-    recommended_courses_collab = collaborative_recommender(course_name)
-    ratings_for_each_course_collab = []
-    for i in recommended_courses_collab:
-        course_title = df2.loc[df2['course_title'].str.lower() == i.lower(), 'course_title'].iloc[0]
-        non_zero_ratings_for_course = df2[(df2['course_title'] == course_title) & (df2['Rating'] != 0)]['Rating']
-        ratings_array = np.array(non_zero_ratings_for_course.mean())
-        ratings_for_each_course_collab.append(ratings_array.tolist())
-    ratings_array2_collab = [np.mean(ratings_for_each_course_collab)] * len(recommended_courses_collab)
-    mae_collab = mean_absolute_error(ratings_array2_collab, ratings_for_each_course_collab)
-    mse_collab = mean_squared_error(ratings_array2_collab, ratings_for_each_course_collab)
-    
-    # Hybrid evaluation
-    recommended_courses_hybrid = hybrid_recommender(course_name)
-    ratings_for_each_course_hybrid = []
-    for i in recommended_courses_hybrid:
-        course_title = df2.loc[df2['course_title'].str.lower() == i.lower(), 'course_title'].iloc[0]
-        non_zero_ratings_for_course = df2[(df2['course_title'] == course_title) & (df2['Rating'] != 0)]['Rating']
-        ratings_array = np.array(non_zero_ratings_for_course.mean())
-        ratings_for_each_course_hybrid.append(ratings_array.tolist())
-    ratings_array2_hybrid = [np.mean(ratings_for_each_course_hybrid)] * len(recommended_courses_hybrid)
-    mae_hybrid = mean_absolute_error(ratings_array2_hybrid, ratings_for_each_course_hybrid)
-    mse_hybrid = mean_squared_error(ratings_array2_hybrid, ratings_for_each_course_hybrid)
-    
-    return {
-        "Content-Based": {"MAE": mae_content, "MSE": mse_content},
-        "Collaborative": {"MAE": mae_collab, "MSE": mse_collab},
-        "Hybrid": {"MAE": mae_hybrid, "MSE": mse_hybrid}
-    }
+def evaluate_model_recommendations(model_recommender, course_name):
+    ratings_array = []
+    non_zero_ratings_for_course = df2[(df2['course_title'] == course_name) & (df2['Rating'] != 0)]['Rating']
+    mean_rating_course = np.mean(non_zero_ratings_for_course)
+    ratings_array.append(mean_rating_course)
 
+    recommended_courses = model_recommender(course_name)
+    ratings_array_2 = [mean_rating_course] * len(recommended_courses)
+    ratings_for_each_course = []
+    for recommended_course in recommended_courses:
+        non_zero_ratings_for_course = df2[(df2['course_title'] == recommended_course) & (df2['Rating'] != 0)]['Rating']
+        mean_rating = np.mean(non_zero_ratings_for_course)
+        ratings_for_each_course.append(mean_rating)
+        
+    ratings_array_2 = np.nan_to_num(ratings_array_2, nan=mean_rating_course)
+    ratings_for_each_course = np.nan_to_num(ratings_for_each_course, nan=mean_rating_course)
+
+    mae = mean_absolute_error(ratings_array_2, ratings_for_each_course)
+    mse = mean_squared_error(ratings_array_2, ratings_for_each_course)
+
+    return {"MAE": mae, "MSE": mse}
 
 # Streamlit app
 def recommend_courses(user_input, course, selected_tab_index):
@@ -144,21 +139,34 @@ def recommend_courses(user_input, course, selected_tab_index):
         else:
             if selected_tab_index == "Content-Based":
                 recommendations = content_based_recommender(course)
+                evaluation_metrics = evaluate_model_recommendations(content_based_recommender, course)
             elif selected_tab_index == "Collaborative":
                 recommendations = collaborative_recommender(course)
+                evaluation_metrics = evaluate_model_recommendations(collaborative_recommender, course)
             elif selected_tab_index == "Hybrid":
                 recommendations = hybrid_recommender(course)
+                evaluation_metrics = evaluate_model_recommendations(hybrid_recommender, course)
             else:
                 recommendations = None
+                evaluation_metrics = None
+
             if recommendations is None:
                 st.write("No recommendations found.")
             else:
                 st.write(f"Here are some recommended courses using {selected_tab_index} recommender system:")
                 for rec in recommendations:
                     st.write(f"- {rec}")
+
+                # Display evaluation metrics
+                st.markdown("---")
+                st.write("Evaluation Metrics:")
+                st.write("- Mean Absolute Error (MAE): {:.4f}".format(evaluation_metrics['MAE']))
+                st.write("- Mean Squared Error (MSE): {:.4f}".format(evaluation_metrics['MSE']))
+
     elif not user_input:
         st.subheader("Hello guys!")
         st.write("Enter a subject or course title in the text box on the left. \n\nThen, choose a recommendation type from the options provided. ")
+
 
 st.title("🎓Udemy Course Recommender🎓")
 user_input = st.sidebar.text_input("Enter a subject or course title:", key="user_input")
